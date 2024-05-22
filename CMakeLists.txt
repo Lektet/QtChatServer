@@ -16,9 +16,6 @@ find_package(Qt${QT_VERSION_MAJOR} COMPONENTS Widgets LinguistTools Network REQU
 
 set(TS_FILES Server_en_US.ts)
 
-set(TCP_LIB_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../TcpDataTransmitter/build-TcpDataTransmitter-Desktop-Debug/libTcpDataTransmitter.a")
-set(TCP_LIB_INCLUDES_PATH "../../TcpDataTransmitter/TcpDataTransmitter/")
-
 set(PROJECT_SOURCES
         main.cpp
         mainwindow.cpp
@@ -38,32 +35,19 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
         MANUAL_FINALIZATION
         ${PROJECT_SOURCES}
     )
-# Define target properties for Android with Qt 6 as:
-#    set_property(TARGET Server APPEND PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR
-#                 ${CMAKE_CURRENT_SOURCE_DIR}/android)
-# For more information, see https://doc.qt.io/qt-6/qt-add-executable.html#target-creation
 
     qt_create_translation(QM_FILES ${CMAKE_SOURCE_DIR} ${TS_FILES})
 else()
-    if(ANDROID)
-        add_library(Server SHARED
-            ${PROJECT_SOURCES}
-        )
-# Define properties for Android with Qt 5 after find_package() calls as:
-#    set(ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android")
-    else()
-        add_executable(Server
-            ${PROJECT_SOURCES}
-        )
-    endif()
+    add_executable(Server
+        ${PROJECT_SOURCES}
+    )
 
     qt5_create_translation(QM_FILES ${CMAKE_SOURCE_DIR} ${TS_FILES})
 endif()
 
-target_include_directories(Server PRIVATE ${TCP_LIB_INCLUDES_PATH})
 target_link_libraries(Server PRIVATE Qt${QT_VERSION_MAJOR}::Widgets
     PRIVATE Qt${QT_VERSION_MAJOR}::Network
-    PRIVATE ${TCP_LIB_PATH})
+    PRIVATE TcpDataTransmitter)
 
 set_target_properties(Server PROPERTIES
     MACOSX_BUNDLE_GUI_IDENTIFIER my.example.com
