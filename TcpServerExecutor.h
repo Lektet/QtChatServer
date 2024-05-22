@@ -2,10 +2,18 @@
 #define TCPSERVERTHREAD_H
 
 #include <QObject>
+#include <QSignalMapper>
 #include <QTcpSocket>
 #include <QThread>
+#include <QUuid>
 
 #include <condition_variable>
+
+enum class MessageType{
+    SendChatMessage,
+    GetChatHistory,
+    Notification
+};
 
 class ChatDataProvider;
 
@@ -14,28 +22,35 @@ class TcpServerExecutor : public QObject
     Q_OBJECT
 
 public:
-    TcpServerExecutor(int socketDescriptor, std::shared_ptr<ChatDataProvider> chatData);
+    TcpServerExecutor(std::shared_ptr<ChatDataProvider> chatData);
+    ~TcpServerExecutor();
 
-    void start();
     void stop();
-    void wait();
 
     void onDataUpdate();
+
+public slots:
+    void addClient(int socketDescriptor);
 
 signals:
     void error(QTcpSocket::SocketError socketError);
 
-    void executionFinished();
+    void finished();
 
 private:
-    int socketDescriptor;
     std::shared_ptr<ChatDataProvider> chatDataProvider;
-    std::shared_ptr<QTcpSocket> tcpSocket;
-    QThread executorThread;
+//    QSignalMapper* readyReadSignalMapper;
+//    QSignalMapper* disconnectedSignalMapper;
 
-    void init();
-    void onReadyRead();
+    std::map<QUuid, QTcpSocket*> clientSockets;
+    using RequestSequence = std::list<MessageType>;
+    std::list<std::pair<QUuid, RequestSequence>> socketStates;
+    bool stopping;
+
     void onStop();
+
+    void onReadyReadMapped(const QUuid &id);
+    void onDisconnectedMapped(const QUuid &id);
 };
 
 #endif // TCPSERVERTHREAD_H

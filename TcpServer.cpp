@@ -10,9 +10,17 @@
 
 TcpServer::TcpServer(std::shared_ptr<ChatDataProvider> chatData, QObject *parent) :
     QTcpServer(parent),
-    chatData(chatData)
+    chatData(chatData),
+    serverExecutor(new TcpServerExecutor(chatData)),
+    executorThread(new QThread(this))
 {
+    connect(chatData.get(), &ChatDataProvider::messagesUpdated, serverExecutor, &TcpServerExecutor::onDataUpdate, Qt::QueuedConnection);
+    connect(qApp, &QApplication::aboutToQuit, serverExecutor, &TcpServerExecutor::stop, Qt::QueuedConnection);
 
+    serverExecutor->moveToThread(executorThread);
+    connect(serverExecutor, &TcpServerExecutor::finished, executorThread, &QThread::quit);
+    connect(executorThread, &QThread::finished, serverExecutor, &TcpServerExecutor::deleteLater);
+    executorThread->start();
 }
 
 TcpServer::~TcpServer()
@@ -33,13 +41,8 @@ TcpServer::~TcpServer()
 
 void TcpServer::incomingConnection(qintptr socketDescriptor)
 {
-    TcpServerExecutor* serverExecutor = new TcpServerExecutor(socketDescriptor, chatData);
-    connect(chatData.get(), &ChatDataProvider::messagesUpdated, serverExecutor, &TcpServerExecutor::onDataUpdate, Qt::QueuedConnection);
-    connect(qApp, &QApplication::aboutToQuit, serverExecutor, &TcpServerExecutor::stop);
-    connect(serverExecutor, &TcpServerExecutor::executionFinished, this, [serverExecutor](){
-        serverExecutor->deleteLater();
-    });
-//    serverExecutorList.push_back(serverExecutor);
-
-    serverExecutor->start();
+    QMetaObject::invokeMethod(serverExecutor,
+                              "addClient",
+                              Qt::QueuedConnection,
+                              Q_ARG(int, socketDescriptor));
 }

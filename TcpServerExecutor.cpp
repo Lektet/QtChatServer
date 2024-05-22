@@ -41,48 +41,36 @@ QJsonDocument createSendMessageResponseDocument(const QString& status){
                                   status);
 }
 
-TcpServerExecutor::TcpServerExecutor(int socketDescriptor, std::shared_ptr<ChatDataProvider> chatData)
+TcpServerExecutor::TcpServerExecutor(std::shared_ptr<ChatDataProvider> chatData)
     : QObject(),
-      socketDescriptor(socketDescriptor),
-      chatDataProvider(chatData)
+      chatDataProvider(chatData),
+//      readyReadSignalMapper(new QSignalMapper(this)),
+//      disconnectedSignalMapper(new QSignalMapper(this)),
+      stopping(false)
 {
 }
 
-void TcpServerExecutor::start()
+TcpServerExecutor::~TcpServerExecutor()
 {
-    this->moveToThread(&executorThread);
-    connect(&executorThread, &QThread::started, this, &TcpServerExecutor::init);
-
-    executorThread.start();
-}
-
-void TcpServerExecutor::init()
-{
-    tcpSocket = std::make_shared<QTcpSocket>();
-    if (!tcpSocket->setSocketDescriptor(socketDescriptor)){
-        qDebug() << "setSocketDescriptor() failed";
-        emit error(tcpSocket->error());
-        return;
-    }
-
-    connect(tcpSocket.get(), &QTcpSocket::readyRead, this, &TcpServerExecutor::onReadyRead, Qt::QueuedConnection);
-    connect(tcpSocket.get(), &QTcpSocket::disconnected, this, &TcpServerExecutor::onStop);
-    connect(&executorThread, &QThread::finished, this, &TcpServerExecutor::executionFinished);
+    qDebug() << "~TcpServerExecutor()";
 }
 
 void TcpServerExecutor::stop()
 {
-    if(tcpSocket->state() == QTcpSocket::ConnectedState){
-        tcpSocket->disconnectFromHost();
-    }
-    else{
-        QMetaObject::invokeMethod(this, &TcpServerExecutor::onStop, Qt::QueuedConnection);
-    }
-}
+    qDebug() << "TcpServerExecutor::stop()";
 
-void TcpServerExecutor::wait()
-{
-    executorThread.wait();
+    if(clientSockets.empty()){
+        emit finished();
+        return;
+    }    
+
+    stopping = true;
+    for(auto& it : clientSockets) {
+        auto socket = it.second;
+        if(socket->state() == QTcpSocket::ConnectedState){
+            socket->disconnectFromHost();
+        }
+    }
 }
 
 void TcpServerExecutor::onDataUpdate()
@@ -90,12 +78,44 @@ void TcpServerExecutor::onDataUpdate()
     QJsonDocument notificationDocument = createMessageDocument(notificationValueString,
                                                                 notificationTypeParameterString,
                                                                 messagesUpdatedValueString);
-    TcpDataTransmitter::sendData(notificationDocument.toJson(), *tcpSocket);
+    for(auto& it : clientSockets){
+        TcpDataTransmitter::sendData(notificationDocument.toJson(), *it.second);
+    }
 }
 
-void TcpServerExecutor::onReadyRead()
+void TcpServerExecutor::addClient(int socketDescriptor)
 {
-    QByteArray data = TcpDataTransmitter::receiveData(*tcpSocket);
+    auto tcpSocket = new QTcpSocket(this);
+    if (!tcpSocket->setSocketDescriptor(socketDescriptor)){
+        qDebug() << "setSocketDescriptor() failed";
+        emit error(tcpSocket->error());
+        return;
+    }
+
+    auto id = QUuid::createUuid();
+    clientSockets.insert(std::make_pair(id, tcpSocket));
+    socketStates.push_back(std::make_pair(id, RequestSequence()));
+
+    connect(tcpSocket, &QTcpSocket::readyRead, this, [this, id](){
+        onReadyReadMapped(id);
+    });
+    connect(tcpSocket, &QTcpSocket::disconnected, this, [this, id](){
+        onDisconnectedMapped(id);
+    });
+
+//    connect(tcpSocket, &QTcpSocket::readyRead, readyReadSignalMapper, QOverload<>::of(&QSignalMapper::map));
+//    readyReadSignalMapper->setMapping(tcpSocket, id.toString());
+//    connect(readyReadSignalMapper, &QSignalMapper::mappedString, this, &TcpServerExecutor::onReadyReadMapped);
+//    connect(tcpSocket, &QTcpSocket::disconnected, disconnectedSignalMapper, QOverload<>::of(&QSignalMapper::map));
+//    disconnectedSignalMapper->setMapping(tcpSocket, id.toString());
+//    connect(disconnectedSignalMapper, &QSignalMapper::mappedString, this, &TcpServerExecutor::onDisconnectedMapped);
+}
+
+void TcpServerExecutor::onReadyReadMapped(const QUuid &id)
+{
+    auto socket = clientSockets[id];
+
+    QByteArray data = TcpDataTransmitter::receiveData(*socket);
 
     QJsonParseError jsonParseError;
     auto requestDoc = QJsonDocument::fromJson(data, &jsonParseError);
@@ -116,23 +136,30 @@ void TcpServerExecutor::onReadyRead()
         QJsonDocument responseDocument = createMessageDocument(getHistoryValueString,
                                                                 messagesParameterString,
                                                                 chatHistory);
-        TcpDataTransmitter::sendData(responseDocument.toJson(), *tcpSocket);
+        TcpDataTransmitter::sendData(responseDocument.toJson(), *socket);
     }
     else if(requestType == sendMessageValueString){
         auto message = requestObj.value(messageParameterString).toObject();
         if(chatDataProvider->addChatMessage(message)){
             auto responseDocument = createSendMessageResponseDocument(completedValueString);
-            TcpDataTransmitter::sendData(responseDocument.toJson(), *tcpSocket);
+            TcpDataTransmitter::sendData(responseDocument.toJson(), *socket);
         }
         else{
             auto responseDocument = createSendMessageResponseDocument(failedValueString);
-            TcpDataTransmitter::sendData(responseDocument.toJson(), *tcpSocket);
+            TcpDataTransmitter::sendData(responseDocument.toJson(), *socket);
             qDebug() << "Chat message add error";
         }
     }
 }
 
-void TcpServerExecutor::onStop()
+void TcpServerExecutor::onDisconnectedMapped(const QUuid &id)
 {
-    QThread::currentThread()->quit();
+    qDebug() << "TcpServerExecutor::onDisconnectedMapped()";
+
+    clientSockets[id]->deleteLater();
+    clientSockets.erase(id);
+
+    if(stopping && clientSockets.empty()){
+        emit finished();
+    }
 }

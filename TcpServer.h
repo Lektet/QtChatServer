@@ -2,6 +2,7 @@
 #define TCPSERVER_H
 
 #include <QTcpServer>
+#include <QThread>
 
 class ChatDataProvider;
 class TcpServerExecutor;
@@ -20,9 +21,10 @@ protected:
 
 private:
     std::shared_ptr<ChatDataProvider> chatData;
+    TcpServerExecutor* serverExecutor;
+    QThread* executorThread;
 
 //    std::vector<TcpServerExecutor*> serverExecutorList;
-
 };
 
 #endif // TCPSERVER_H
