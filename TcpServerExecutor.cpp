@@ -7,39 +7,17 @@
 #include "TcpDataTransmitter.h"
 #include "ProtocolFormatSrings.h"
 
+#include "MessageType.h"
+#include "Result.h"
+#include "MessageUtils.h"
+#include "GetHistoryMessage.h"
+#include "GetHistoryResponseMessage.h"
+#include "SendMessageMessage.h"
+#include "SendMessageResponseMessage.h"
+#include "NotificationMessage.h"
+#include "NotificationType.h"
+
 #include "ChatDataProvider.h"
-
-
-const QString sendMessageValueString = ProtocolFormat::getProtocolStringLiteral(ProtocolFormat::ProtocolStringLiteral::SEND_CHAT_MESSAGE_REQUEST_TYPE);
-const QString getHistoryValueString = ProtocolFormat::getProtocolStringLiteral(ProtocolFormat::ProtocolStringLiteral::GET_CHAT_HISTORY_REQUEST_TYPE);
-const QString notificationValueString = ProtocolFormat::getProtocolStringLiteral(ProtocolFormat::ProtocolStringLiteral::NOTIFICATION_REQUEST_TYPE);
-const QString typeParameterString = ProtocolFormat::getProtocolStringLiteral(ProtocolFormat::ProtocolStringLiteral::REQUEST_TYPE_KEY_NAME);
-const QString messageParameterString = ProtocolFormat::getProtocolStringLiteral(ProtocolFormat::ProtocolStringLiteral::CHAT_MESSAGE_KEY);
-const QString messagesParameterString = ProtocolFormat::getProtocolStringLiteral(ProtocolFormat::ProtocolStringLiteral::CHAT_HISTORY_KEY_NAME);
-const QString requestResultParameterString = ProtocolFormat::getProtocolStringLiteral(ProtocolFormat::ProtocolStringLiteral::SEND_CHAT_MESSAGE_RESULT_KEY_NAME);
-const QString completedValueString = ProtocolFormat::getProtocolStringLiteral(ProtocolFormat::ProtocolStringLiteral::SEND_CHAT_MESSAGE_RESULT_COMPLETED);
-const QString failedValueString = ProtocolFormat::getProtocolStringLiteral(ProtocolFormat::ProtocolStringLiteral::SEND_CHAT_MESSAGE_RESULT_FAILED);
-const QString notificationTypeParameterString = ProtocolFormat::getProtocolStringLiteral(ProtocolFormat::ProtocolStringLiteral::NOTIFICATION_TYPE_KEY_NAME);
-const QString messagesUpdatedValueString = ProtocolFormat::getProtocolStringLiteral(ProtocolFormat::ProtocolStringLiteral::NOTIFICATION_MESSAGES_UPDATED);
-const int WAIT_FOR_INCOMING_DATA_INTERVAL = 60 * 60 * 1000;
-
-
-QJsonDocument createMessageDocument(const QString& typeValue, const QString& dataKey, const QJsonValue &dataValue){
-    QJsonObject responseObject;
-    responseObject.insert(typeParameterString, typeValue);
-    responseObject.insert(dataKey, dataValue);
-
-    QJsonDocument responseDocument;
-    responseDocument.setObject(responseObject);
-
-    return responseDocument;
-}
-
-QJsonDocument createSendMessageResponseDocument(const QString& status){
-    return createMessageDocument(sendMessageValueString,
-                                  requestResultParameterString,
-                                  status);
-}
 
 TcpServerExecutor::TcpServerExecutor(std::shared_ptr<ChatDataProvider> chatData)
     : QObject(),
@@ -75,11 +53,9 @@ void TcpServerExecutor::stop()
 
 void TcpServerExecutor::onDataUpdate()
 {
-    QJsonDocument notificationDocument = createMessageDocument(notificationValueString,
-                                                                notificationTypeParameterString,
-                                                                messagesUpdatedValueString);
+    NotificationMessage message(NotificationType::MessagesUpdated);
     for(auto& it : clientSockets){
-        TcpDataTransmitter::sendData(notificationDocument.toJson(), *it.second);
+        TcpDataTransmitter::sendData(message.toJson().toJson(), *it.second);
     }
 }
 
@@ -94,7 +70,7 @@ void TcpServerExecutor::addClient(int socketDescriptor)
 
     auto id = QUuid::createUuid();
     clientSockets.insert(std::make_pair(id, tcpSocket));
-    socketStates.push_back(std::make_pair(id, RequestSequence()));
+//    socketStates.push_back(std::make_pair(id, RequestSequence()));
 
     connect(tcpSocket, &QTcpSocket::readyRead, this, [this, id](){
         onReadyReadMapped(id);
@@ -102,13 +78,6 @@ void TcpServerExecutor::addClient(int socketDescriptor)
     connect(tcpSocket, &QTcpSocket::disconnected, this, [this, id](){
         onDisconnectedMapped(id);
     });
-
-//    connect(tcpSocket, &QTcpSocket::readyRead, readyReadSignalMapper, QOverload<>::of(&QSignalMapper::map));
-//    readyReadSignalMapper->setMapping(tcpSocket, id.toString());
-//    connect(readyReadSignalMapper, &QSignalMapper::mappedString, this, &TcpServerExecutor::onReadyReadMapped);
-//    connect(tcpSocket, &QTcpSocket::disconnected, disconnectedSignalMapper, QOverload<>::of(&QSignalMapper::map));
-//    disconnectedSignalMapper->setMapping(tcpSocket, id.toString());
-//    connect(disconnectedSignalMapper, &QSignalMapper::mappedString, this, &TcpServerExecutor::onDisconnectedMapped);
 }
 
 void TcpServerExecutor::onReadyReadMapped(const QUuid &id)
@@ -123,32 +92,34 @@ void TcpServerExecutor::onReadyReadMapped(const QUuid &id)
         qDebug() << "Response parse error: " << jsonParseError.errorString();
         return;
     }
-    if(!requestDoc.isObject()){
-        qDebug() << "Response is not JSON object";
-        return;
-    }
 
-    auto requestObj = requestDoc.object();
-    auto requestType = requestObj.value(typeParameterString).toString();
-    qDebug() << "new request: " << requestType;
-    if(requestType == getHistoryValueString){
-        auto& chatHistory = chatDataProvider->getChatHistory();
-        QJsonDocument responseDocument = createMessageDocument(getHistoryValueString,
-                                                                messagesParameterString,
-                                                                chatHistory);
-        TcpDataTransmitter::sendData(responseDocument.toJson(), *socket);
-    }
-    else if(requestType == sendMessageValueString){
-        auto message = requestObj.value(messageParameterString).toObject();
-        if(chatDataProvider->addChatMessage(message)){
-            auto responseDocument = createSendMessageResponseDocument(completedValueString);
-            TcpDataTransmitter::sendData(responseDocument.toJson(), *socket);
+    auto message = MessageUtils::createMessageFromJson(requestDoc);
+    auto messageType = message->getMessageType();
+    switch (messageType) {
+        case MessageType::GetHistory:{
+            auto& chatHistory = chatDataProvider->getChatHistory();
+            GetHistoryResponseMessage responseMessage(chatHistory);
+            TcpDataTransmitter::sendData(responseMessage.toJson().toJson(), *socket);
+            break;
         }
-        else{
-            auto responseDocument = createSendMessageResponseDocument(failedValueString);
-            TcpDataTransmitter::sendData(responseDocument.toJson(), *socket);
-            qDebug() << "Chat message add error";
+        case MessageType::SendMessage:{
+            auto sentMessage = std::static_pointer_cast<SendMessageMessage>(message);
+            auto messageText = sentMessage->getMessageData();
+            if(chatDataProvider->addChatMessage(messageText)){
+                SendMessageResponseMessage responseMessage(Result::Success);
+                TcpDataTransmitter::sendData(responseMessage.toJson().toJson(), *socket);
+                break;
+            }
+            else{
+                SendMessageResponseMessage responseMessage(Result::Fail);
+                TcpDataTransmitter::sendData(responseMessage.toJson().toJson(), *socket);
+                qDebug() << "Chat message add error";
+                break;
+            }
         }
+        default:
+            qDebug() << "Received message have wrong type: " << messageTypeToString(messageType);
+            break;
     }
 }
 

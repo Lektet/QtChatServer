@@ -7,14 +7,6 @@
 #include <QThread>
 #include <QUuid>
 
-#include <condition_variable>
-
-enum class MessageType{
-    SendChatMessage,
-    GetChatHistory,
-    Notification
-};
-
 class ChatDataProvider;
 
 class TcpServerExecutor : public QObject
@@ -39,12 +31,8 @@ signals:
 
 private:
     std::shared_ptr<ChatDataProvider> chatDataProvider;
-//    QSignalMapper* readyReadSignalMapper;
-//    QSignalMapper* disconnectedSignalMapper;
 
     std::map<QUuid, QTcpSocket*> clientSockets;
-    using RequestSequence = std::list<MessageType>;
-    std::list<std::pair<QUuid, RequestSequence>> socketStates;
     bool stopping;
 
     void onStop();
