@@ -8,16 +8,26 @@
 
 #include <QDebug>
 
-TcpServer::TcpServer(std::shared_ptr<ChatDataProvider> chatData, QObject *parent) :
+TcpServer::TcpServer(std::shared_ptr<ChatDataProvider> chatProvider, QObject *parent) :
     QTcpServer(parent),
-    chatData(chatData),
-    serverExecutor(new TcpServerExecutor(chatData)),
+    chatDataProvider(chatProvider),
+    serverExecutor(new TcpServerExecutor(chatDataProvider)),
     executorThread(new QThread(this))
 {
-    connect(chatData.get(), &ChatDataProvider::messagesUpdated, serverExecutor, &TcpServerExecutor::onDataUpdate, Qt::QueuedConnection);
+    serverExecutor->moveToThread(executorThread);
+
+    connect (serverExecutor, &TcpServerExecutor::newMessageReceived,
+             this, [this](const QJsonObject& message, const QUuid& clientId){
+        auto result = chatDataProvider->addChatMessage(message);
+        QMetaObject::invokeMethod(serverExecutor,
+                                  "onMessageAdded",
+                                  Qt::QueuedConnection,
+                                  Q_ARG(bool, result),
+                                  Q_ARG(QUuid, clientId));
+    }, Qt::QueuedConnection);
+    connect(chatDataProvider.get(), &ChatDataProvider::messagesUpdated, serverExecutor, &TcpServerExecutor::onMessagesUpdated, Qt::QueuedConnection);
     connect(qApp, &QApplication::aboutToQuit, serverExecutor, &TcpServerExecutor::stop, Qt::QueuedConnection);
 
-    serverExecutor->moveToThread(executorThread);
     connect(serverExecutor, &TcpServerExecutor::finished, executorThread, &QThread::quit);
     connect(executorThread, &QThread::finished, serverExecutor, &TcpServerExecutor::deleteLater);
     executorThread->start();

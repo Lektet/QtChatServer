@@ -24,6 +24,7 @@ ChatDataProvider::ChatDataProvider(QObject *parent) :
 
 const QJsonArray ChatDataProvider::getChatHistory() const
 {
+    const std::lock_guard<std::mutex> lock(accessMutex);
     return chatHistory;
 }
 
@@ -49,7 +50,7 @@ bool ChatDataProvider::addChatMessage(const QJsonObject message)
 
     QJsonObject messageToAdd(message);
     messageToAdd.insert(MESSAGE_TIME_KEY, QDateTime::currentMSecsSinceEpoch());
-    const std::lock_guard<std::mutex> lock(writeMutex);
+    const std::lock_guard<std::mutex> lock(accessMutex);
     messageToAdd.insert(MESSAGE_ID_KEY, maxIdValue++);
     chatHistory.append(messageToAdd);
 

@@ -16,7 +16,7 @@ class ChatDataProvider : public QObject
 public:
     explicit ChatDataProvider(QObject *parent = nullptr);
 
-    const QJsonArray getChatHistory() const;
+    const QJsonArray getChatHistory() const;//TODO: Is thread safe?
     bool addChatMessage(const QJsonObject message);
 
 signals:
@@ -26,7 +26,7 @@ private:
     QJsonArray chatHistory;
     int maxIdValue;
 
-    std::mutex writeMutex;
+    mutable std::mutex accessMutex;
 
     //TODO: Write and read max id
     void readMessagesDataFromFile();
