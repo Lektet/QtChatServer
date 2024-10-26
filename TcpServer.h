@@ -4,7 +4,6 @@
 #include <QTcpServer>
 #include <QThread>
 
-class ChatDataProvider;
 class TcpServerExecutor;
 
 class TcpServer : public QTcpServer
@@ -13,14 +12,13 @@ class TcpServer : public QTcpServer
 
 
 public:
-    explicit TcpServer(std::shared_ptr<ChatDataProvider> chatProvider, QObject *parent = nullptr);
+    explicit TcpServer(QObject *parent = nullptr);
     ~TcpServer();
 
 protected:
     void incomingConnection(qintptr socketDescriptor) override;
 
 private:
-    std::shared_ptr<ChatDataProvider> chatDataProvider;
     TcpServerExecutor* serverExecutor;
     QThread* executorThread;
 

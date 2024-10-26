@@ -13,38 +13,34 @@
 
 class ChatDataProvider;
 class SimpleMessage;
+struct NewChatMessageData;
 
 class TcpServerExecutor : public QObject
 {
     Q_OBJECT
 
 public:
-    TcpServerExecutor(std::shared_ptr<ChatDataProvider> chatData);
+    TcpServerExecutor();
     ~TcpServerExecutor();
 
     void stop();
 
-    void onMessagesUpdated();
+    void notifyAboutMessagesUpdate();
 
 public slots:
     void addClient(int socketDescriptor);
 
-    void onMessageAdded(bool success, const QUuid& clientId);
-
 signals:
-    void newMessageReceived(const QJsonObject& message, const QUuid& clientId);
-
     void error(QTcpSocket::SocketError socketError);
 
     void finished();
 
 private:    
     enum class OtherThreadAction{
-        NoAction,
-        AddMessage
+        NoAction
     };
 
-    std::shared_ptr<ChatDataProvider> chatDataProvider;
+    ChatDataProvider* chatDataProvider;
 
     std::map<QUuid, QTcpSocket*> clientSockets;
     std::map<QUuid, OtherThreadAction> awaitedExternalActions;

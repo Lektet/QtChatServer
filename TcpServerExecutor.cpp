@@ -15,12 +15,23 @@
 #include "SendMessageResponseMessage.h"
 #include "NotificationMessage.h"
 #include "NotificationType.h"
+#include "ChatMessageData.h"
 
 #include "ChatDataProvider.h"
 
-TcpServerExecutor::TcpServerExecutor(std::shared_ptr<ChatDataProvider> chatData)
+Result resultFromBool(bool result)
+{
+    if(result){
+        return Result::Success;
+    }
+    else{
+        return Result::Fail;
+    }
+}
+
+TcpServerExecutor::TcpServerExecutor()
     : QObject(),
-      chatDataProvider(chatData),
+      chatDataProvider(new ChatDataProvider(this)),
       stopping(false)
 {
 }
@@ -48,21 +59,15 @@ void TcpServerExecutor::stop()
     }
 }
 
-void TcpServerExecutor::onMessagesUpdated()
+void TcpServerExecutor::notifyAboutMessagesUpdate()
 {
     qDebug() << "TcpServerExecutor::onMessagesUpdated()";
     auto message = std::make_shared<NotificationMessage>(NotificationType::MessagesUpdated);
     for(auto& item : awaitedExternalActions){
-        auto clientId = item.first;
-        if(item.second == OtherThreadAction::NoAction){
-            auto socket = clientSockets.at(clientId);
-            TcpDataTransmitter::sendData(message->toJson().toJson(), *socket);
-            qDebug() << "Messages updated notification sent";
-        }
-        else{
-            clientNotificationLists.at(clientId).push_back(message);
-            qDebug() << "MessagesUpdated notification added to queue";
-        }
+        auto clientId = item.first;        
+        auto socket = clientSockets.at(clientId);
+        TcpDataTransmitter::sendData(message->toJson().toJson(), *socket);
+        qDebug() << "Messages updated notification sent";
     }
 }
 
@@ -87,35 +92,6 @@ void TcpServerExecutor::addClient(int socketDescriptor)
     connect(tcpSocket, &QTcpSocket::disconnected, this, [this, id](){
         onDisconnectedMapped(id);
     });
-}
-
-void TcpServerExecutor::onMessageAdded(bool success, const QUuid &clientId)
-{
-    if(awaitedExternalActions.at(clientId) != OtherThreadAction::AddMessage){
-        qCritical() << "This excecutor instance is not waiting for message to be added!";
-        return;
-    }
-
-    auto socket = clientSockets.at(clientId);
-    SendMessageResponseMessage responseMessage;
-    if(success){
-        responseMessage.setResult(Result::Success);
-    }
-    else{
-        responseMessage.setResult(Result::Fail);
-    }
-    TcpDataTransmitter::sendData(responseMessage.toJson().toJson(), *socket);
-    qDebug() << "Response to add message sent";
-
-    //Processing queued notifications
-    auto clientNotificications = clientNotificationLists.at(clientId);
-    if(!clientNotificications.empty()){
-        for(auto& notification : clientNotificications){
-            TcpDataTransmitter::sendData(notification->toJson().toJson(), *socket);
-            qDebug() << "Queued notification sent";
-        }
-        clientNotificications.clear();
-    }
 }
 
 void TcpServerExecutor::onReadyReadMapped(const QUuid &id)
@@ -146,20 +122,29 @@ void TcpServerExecutor::onReadyReadMapped(const QUuid &id)
     auto messageType = message->getMessageType();
     switch (messageType) {
         case MessageType::GetHistory:{
-            auto& chatHistory = chatDataProvider->getChatHistory();
-            GetHistoryResponseMessage responseMessage(chatHistory);
+            auto chatHistory = chatDataProvider->getChatHistory();
+            GetHistoryResponseMessage responseMessage(std::move(chatHistory));
             TcpDataTransmitter::sendData(responseMessage.toJson().toJson(), *socket);
             break;
         }
         case MessageType::SendMessage:{
             auto sentMessage = std::static_pointer_cast<SendMessageMessage>(message);
-            auto messageObject = sentMessage->getMessageObject();
-            emit newMessageReceived(messageObject, id);
-            awaitedExternalActions.at(id) = OtherThreadAction::AddMessage;
+//            addMessage(sentMessage->getChatMessageData(), socket);
+            auto success = chatDataProvider->addChatMessage(sentMessage->getChatMessageData());
+            SendMessageResponseMessage responseMessage(resultFromBool(success));
+            TcpDataTransmitter::sendData(responseMessage.toJson().toJson(), *socket);
+
+            if(success){
+                qDebug() << "New messages added successfully";
+                notifyAboutMessagesUpdate();
+            }
+            else{
+                qWarning() << "New message add failed";
+            }
             break;
         }
         default:
-            qDebug() << "Received message have wrong type: " << messageTypeToString(messageType);
+            qDebug() << "Received message have a wrong type: " << messageTypeToString(messageType);
             break;
     }
 }

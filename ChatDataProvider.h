@@ -3,11 +3,17 @@
 
 #include <QObject>
 
+#include <QSqlDatabase>
+
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
 
+#include <future>
 #include <mutex>
+
+struct ChatMessageData;
+struct NewChatMessageData;
 
 class ChatDataProvider : public QObject
 {
@@ -16,21 +22,13 @@ class ChatDataProvider : public QObject
 public:
     explicit ChatDataProvider(QObject *parent = nullptr);
 
-    const QJsonArray getChatHistory() const;//TODO: Is thread safe?
-    bool addChatMessage(const QJsonObject message);
-
-signals:
-    void messagesUpdated();
+    std::vector<ChatMessageData> getChatHistory() const;//TODO: Is thread safe?
+    bool addChatMessage(const NewChatMessageData& message);//TODO: Check if making message a reference is possible
 
 private:
-    QJsonArray chatHistory;
-    int maxIdValue;
+    QSqlDatabase database;
 
-    mutable std::mutex accessMutex;
-
-    //TODO: Write and read max id
-    void readMessagesDataFromFile();
-    bool writeMessagesDataToFile();
+//    QSqlDatabase  database();
 };
 
 #endif // CHATDATAPROVIDER_H

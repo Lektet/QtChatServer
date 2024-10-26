@@ -1,130 +1,109 @@
 #include "ChatDataProvider.h"
 
+#include <QSqlDatabase>
+#include <QSqlQuery>
+#include <QSqlError>
+#include <QSqlRecord>
+
 #include <QJsonObject>
 #include <QJsonArray>
+
 #include <QDateTime>
 #include <QFile>
 
+#include <QThread>
+
+#include "ChatMessageData.h"
+#include "NewChatMessageData.h"
+
 #include <QDebug>
 
-const QString MESSAGE_USERNAME_KEY = "Username";
-const QString MESSAGE_TEXT_KEY = "Text";
-const QString MESSAGE_ID_KEY = "Id";
-const QString MESSAGE_TIME_KEY = "Time";
-const QString MESSAGES_FILENAME = "messagesData.json";
-const QString MESSAGES_KEY = "Messages";
-const QString MESSAGE_MAX_ID_KEY = "MaxId";
+const QString MESSAGE_ID_FIELD = "MessageId";
+const QString MESSAGE_USERNAME_FIELD = "Username";
+const QString MESSAGE_TEXT_FIELD = "Text";
+const QString MESSAGE_POST_TIME_FIELD = "PostTime";
+
+const QString DATABASE_FILE_NAME = "database";
 
 ChatDataProvider::ChatDataProvider(QObject *parent) :
-    QObject(parent),
-    maxIdValue(0)
+    QObject(parent)
 {
-    readMessagesDataFromFile();
+    auto newDatabaseName = QString::number((long long)QThread::currentThreadId(), 16);
+    database = QSqlDatabase::addDatabase("QSQLITE", newDatabaseName);
+    database.setDatabaseName(DATABASE_FILE_NAME);
+    auto ok = database.open();
+    if(!ok){
+        qWarning() << "Open database error: " << database.lastError();
+
+    }
+    else{
+        qInfo() << "Open database success";
+    }
 }
 
-const QJsonArray ChatDataProvider::getChatHistory() const
+std::vector<ChatMessageData> ChatDataProvider::getChatHistory() const
 {
-    const std::lock_guard<std::mutex> lock(accessMutex);
-    return chatHistory;
+    QSqlQuery query(database);
+    QString queryString("SELECT %1, %2, %3, %4 "
+                        "FROM Messages INNER JOIN Users "
+                        "ON Messages.UserId = Users.UserId;");
+    queryString = queryString.arg(MESSAGE_ID_FIELD).
+            arg(MESSAGE_USERNAME_FIELD)
+            .arg(MESSAGE_TEXT_FIELD)
+            .arg(MESSAGE_POST_TIME_FIELD);
+    query.prepare(queryString);
+    if(!query.exec()){
+        qDebug() << "Retrieving messages from db failed: " << query.lastError();
+        return std::vector<ChatMessageData>();
+    }
+
+    auto record = query.record();
+    auto messageIdIndex = record.indexOf(MESSAGE_ID_FIELD);
+    auto usernameIndex = record.indexOf(MESSAGE_USERNAME_FIELD);
+    auto textIndex = record.indexOf(MESSAGE_TEXT_FIELD);
+    auto postTimeIndex = record.indexOf(MESSAGE_POST_TIME_FIELD);
+    std::vector<ChatMessageData> messages;
+    while(query.next()){
+        ChatMessageData messageData;
+        messageData.id = query.value(messageIdIndex).toString();
+        messageData.username = query.value(usernameIndex).toString();
+        messageData.text = query.value(textIndex).toString();
+        messageData.postTime = query.value(postTimeIndex).toString();
+        messages.push_back(std::move(messageData));
+    }
+
+    return messages;
 }
 
-bool ChatDataProvider::addChatMessage(const QJsonObject message)
+bool ChatDataProvider::addChatMessage(const NewChatMessageData &message)
 {
-    if(!message.contains(MESSAGE_USERNAME_KEY)){
-        qDebug() << "Message have username";
-        return false;
-    }
-    if(message.value(MESSAGE_USERNAME_KEY).toString().isEmpty()){
-        qDebug() << "Username is empty";
+    if(message.text.isEmpty()){
+        qWarning() << "Text is empty";
         return false;
     }
 
-    if(!message.contains(MESSAGE_TEXT_KEY)){
-        qDebug() << "Message have text";
-        return false;
-    }
-    if(message.value(MESSAGE_TEXT_KEY).toString().isEmpty()){
-        qDebug() << "Message is empty";
+    if(message.username.isEmpty()){
+        qWarning() << "Username is empty";
         return false;
     }
 
-    QJsonObject messageToAdd(message);
-    messageToAdd.insert(MESSAGE_TIME_KEY, QDateTime::currentMSecsSinceEpoch());
-    const std::lock_guard<std::mutex> lock(accessMutex);
-    messageToAdd.insert(MESSAGE_ID_KEY, maxIdValue++);
-    chatHistory.append(messageToAdd);
+    auto postTime = QString::number(QDateTime::currentMSecsSinceEpoch());
+    QSqlQuery query(database);
+    QString queryString("INSERT INTO Messages ("
+                        "Text, "
+                        "PostTime, "
+                        "UserId) "
+                        "VALUES (\"%1\", \"%2\", (SELECT UserId FROM Users WHERE Username = \"%3\"));");
+    queryString = queryString.arg(message.text)
+            .arg(postTime)
+            .arg(message.username);
+    query.prepare(queryString);
+    qDebug() << "Add message query: " << queryString;
 
-    auto writeResult = writeMessagesDataToFile();
-    if(writeResult){
-        emit messagesUpdated();
-    }
-    return writeResult;
-}
-
-void ChatDataProvider::readMessagesDataFromFile()
-{
-    QFile file(MESSAGES_FILENAME);
-    if(!file.open(QFile::ReadOnly)){
-        qDebug() << "messages file open error: " << file.errorString();
-        return;
-    }
-
-    QJsonParseError parseError;
-    auto document = QJsonDocument::fromJson(file.readAll(), &parseError);
-    if(document.isNull()){
-        qDebug() << "Error parsing messages file: " << parseError.errorString();
-        file.close();
-        return;
-    }
-    file.close();
-
-    auto jsonObject = document.object();
-    if(!jsonObject.contains(MESSAGES_KEY)){
-        qDebug() << "Can't find messages in file";
-        return;
-    }
-
-    if(!jsonObject.contains(MESSAGE_MAX_ID_KEY)){
-        qDebug() << "Can't find message max id in file";
-        return;
-    }
-
-    auto messagesDataValue = jsonObject.value(MESSAGES_KEY);
-    if(!messagesDataValue.isArray()){
-        qDebug() << "Messages have wrong type";
-        return;
-    }
-
-    auto maxIdDataValue = jsonObject.value(MESSAGE_MAX_ID_KEY);
-    if(!maxIdDataValue.isDouble()){
-        qDebug() << "Message max id have wrong type";
-        return;
-    }
-
-    chatHistory = messagesDataValue.toArray();
-    maxIdValue = maxIdDataValue.toInt();
-}
-
-bool ChatDataProvider::writeMessagesDataToFile()
-{
-    QFile file(MESSAGES_FILENAME);
-    if(!file.open(QFile::WriteOnly)){
-        qDebug() << "messages file open error: " << file.errorString();
+    auto execResult = query.exec();
+    if(!execResult){
+        qWarning() << "Adding message to db failed: " << query.lastError();
         return false;
     }
-
-    QJsonObject object;
-    object.insert(MESSAGES_KEY, chatHistory);
-    object.insert(MESSAGE_MAX_ID_KEY, maxIdValue);
-    QJsonDocument document;
-    document.setObject(object);
-    if(file.write(document.toJson()) == -1){
-        qDebug() << "Write chat history to file error";
-        file.close();
-        return false;
-    }
-
-    file.close();
-
     return true;
 }

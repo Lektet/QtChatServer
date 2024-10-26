@@ -21,7 +21,6 @@ public:
 private:
     Ui::MainWindow *ui;
 
-    std::shared_ptr<ChatDataProvider> chatData;
     TcpServer* tcpServer;
 };
 #endif // MAINWINDOW_H

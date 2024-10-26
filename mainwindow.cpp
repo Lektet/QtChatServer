@@ -12,8 +12,7 @@
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent),
       ui(new Ui::MainWindow),
-      chatData(std::make_shared<ChatDataProvider>()),
-      tcpServer(new TcpServer(chatData, parent))
+      tcpServer(new TcpServer(parent))
 {
     ui->setupUi(this);
 
