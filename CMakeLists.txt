@@ -11,23 +11,18 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(QT NAMES Qt6 Qt5 COMPONENTS Widgets LinguistTools Network Sql REQUIRED)
-find_package(Qt${QT_VERSION_MAJOR} COMPONENTS Widgets LinguistTools Network Sql REQUIRED)
+find_package(QT NAMES Qt6 Qt5 COMPONENTS Core LinguistTools Network Sql REQUIRED)
+find_package(Qt${QT_VERSION_MAJOR} COMPONENTS Core LinguistTools Network Sql REQUIRED)
 
-set(TS_FILES Server_en_US.ts)
 
 set(PROJECT_SOURCES
         main.cpp
-        mainwindow.cpp
-        mainwindow.h
-        mainwindow.ui
         TcpServer.cpp
         TcpServer.h
         TcpServerExecutor.h
         TcpServerExecutor.cpp
         ChatDataProvider.h
         ChatDataProvider.cpp
-        ${TS_FILES}
 )
 
 if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
@@ -35,17 +30,13 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
         MANUAL_FINALIZATION
         ${PROJECT_SOURCES}
     )
-
-    qt_create_translation(QM_FILES ${CMAKE_SOURCE_DIR} ${TS_FILES})
 else()
     add_executable(Server
         ${PROJECT_SOURCES}
     )
-
-    qt5_create_translation(QM_FILES ${CMAKE_SOURCE_DIR} ${TS_FILES})
 endif()
 
-target_link_libraries(Server PRIVATE Qt${QT_VERSION_MAJOR}::Widgets
+target_link_libraries(Server PRIVATE Qt${QT_VERSION_MAJOR}::Core
     PRIVATE Qt${QT_VERSION_MAJOR}::Network
     PRIVATE Qt${QT_VERSION_MAJOR}::Sql
     PRIVATE TcpDataTransmitter

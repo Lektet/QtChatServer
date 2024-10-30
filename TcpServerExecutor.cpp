@@ -61,7 +61,7 @@ void TcpServerExecutor::stop()
 
 void TcpServerExecutor::notifyAboutMessagesUpdate()
 {
-    qDebug() << "TcpServerExecutor::onMessagesUpdated()";
+    qDebug() << "TcpServerExecutor::notifyAboutMessagesUpdate()";
     auto message = std::make_shared<NotificationMessage>(NotificationType::MessagesUpdated);
     for(auto& item : awaitedExternalActions){
         auto clientId = item.first;        
@@ -129,7 +129,6 @@ void TcpServerExecutor::onReadyReadMapped(const QUuid &id)
         }
         case MessageType::SendMessage:{
             auto sentMessage = std::static_pointer_cast<SendMessageMessage>(message);
-//            addMessage(sentMessage->getChatMessageData(), socket);
             auto success = chatDataProvider->addChatMessage(sentMessage->getChatMessageData());
             SendMessageResponseMessage responseMessage(resultFromBool(success));
             TcpDataTransmitter::sendData(responseMessage.toJson().toJson(), *socket);

@@ -1,7 +1,7 @@
 #include "TcpServer.h"
 
 #include <QThread>
-#include <QApplication>
+#include <QCoreApplication>
 
 #include "TcpServerExecutor.h"
 #include "ChatDataProvider.h"
@@ -16,9 +16,9 @@ TcpServer::TcpServer(QObject *parent) :
 {
     serverExecutor->moveToThread(executorThread);
 
-    connect(qApp, &QApplication::aboutToQuit, serverExecutor, &TcpServerExecutor::stop, Qt::QueuedConnection);
+    connect(qApp, &QCoreApplication::aboutToQuit, serverExecutor, &TcpServerExecutor::stop, Qt::QueuedConnection);
     connect(serverExecutor, &TcpServerExecutor::finished, executorThread, &QThread::quit);
-    connect(executorThread, &QThread::finished, serverExecutor, &TcpServerExecutor::deleteLater);
+    connect(serverExecutor, &TcpServerExecutor::finished, serverExecutor, &TcpServerExecutor::deleteLater);
     executorThread->start();
 }
 

@@ -1,23 +1,22 @@
 #include "mainwindow.h"
 
-#include <QApplication>
+#include <QCoreApplication>
 #include <QLocale>
 #include <QTranslator>
 
+#include "TcpServer.h"
+
+#include <QDebug>
+
 int main(int argc, char *argv[])
 {
-    QApplication a(argc, argv);
+    QCoreApplication a(argc, argv);
 
-    QTranslator translator;
-    const QStringList uiLanguages = QLocale::system().uiLanguages();
-    for (const QString &locale : uiLanguages) {
-        const QString baseName = "Server_" + QLocale(locale).name();
-        if (translator.load(":/i18n/" + baseName)) {
-            a.installTranslator(&translator);
-            break;
-        }
+    auto tcpServer = new TcpServer(&a);
+
+    if(!tcpServer->listen(QHostAddress::LocalHost, 44000)){
+      qCritical() << "Unable to start server";
     }
-    MainWindow w;
-    w.show();
+
     return a.exec();
 }
