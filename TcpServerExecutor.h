@@ -1,5 +1,5 @@
-#ifndef TCPSERVERTHREAD_H
-#define TCPSERVERTHREAD_H
+#ifndef TCPSERVEREXECUTOR_H
+#define TCPSERVEREXECUTOR_H
 
 #include <QObject>
 #include <QSignalMapper>
@@ -10,10 +10,14 @@
 #include <memory>
 #include <map>
 #include <list>
+#include <unordered_set>
 
-class ChatDataProvider;
+#include "UuidHash.h"
+
+class ChatDataWrapper;
 class SimpleMessage;
 struct NewChatMessageData;
+struct ChatMessageData;
 
 class TcpServerExecutor : public QObject
 {
@@ -23,6 +27,7 @@ public:
     TcpServerExecutor();
     ~TcpServerExecutor();
 
+    void start();
     void stop();
 
     void notifyAboutMessagesUpdate();
@@ -36,16 +41,21 @@ signals:
     void finished();
 
 private:    
-    enum class OtherThreadAction{
-        NoAction
+    enum class ChatDataAction{
+        NoAction,
+        GetHistoryRequest,
+        AddMessageRequest
     };
 
-    ChatDataProvider* chatDataProvider;
+    ChatDataWrapper* chatDataWrapper;
 
     std::map<QUuid, QTcpSocket*> clientSockets;
-    std::map<QUuid, OtherThreadAction> awaitedExternalActions;
     using NotificationList = std::list<std::shared_ptr<SimpleMessage>>;
     std::map<QUuid, NotificationList> clientNotificationLists;
+
+    std::map<int, QUuid> socketWaitingForResultIds;
+    std::map<QUuid, ChatDataAction> socketCurrentAction;
+    std::unordered_set<QUuid> socketNeedingNotificationIds;
 
     bool stopping;
 
@@ -53,6 +63,11 @@ private:
 
     void onReadyReadMapped(const QUuid &id);
     void onDisconnectedMapped(const QUuid &id);
+
+    void onChatHistoryRequestCompleted(int requestId, const std::vector<ChatMessageData>& history);
+    void onAddChatMessageRequestCompleted(int requestId, bool result);
+
+    void sendPendingNotification(const QUuid socketId, QTcpSocket* const socket);
 };
 
-#endif // TCPSERVERTHREAD_H
+#endif // TCPSERVEREXECUTOR_H

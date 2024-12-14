@@ -16,13 +16,23 @@ find_package(Qt${QT_VERSION_MAJOR} COMPONENTS Core LinguistTools Network Sql REQ
 
 
 set(PROJECT_SOURCES
+        AddMessageRequest.h
+        AddMessageRequest.cpp
+        ChatDataRequest.h
+        ChatDataRequest.cpp
+        ChatDataRequestType.h
+        ChatDataWrapper.h
+        ChatDataWrapper.cpp
+        ChatDataWrapperWorker.h
+        ChatDataWrapperWorker.cpp
+        GetHistoryRequest.h
+        GetHistoryRequest.cpp
         main.cpp
         TcpServer.cpp
         TcpServer.h
         TcpServerExecutor.h
         TcpServerExecutor.cpp
-        ChatDataProvider.h
-        ChatDataProvider.cpp
+        UuidHash.h
 )
 
 if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)

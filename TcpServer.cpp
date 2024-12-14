@@ -4,7 +4,7 @@
 #include <QCoreApplication>
 
 #include "TcpServerExecutor.h"
-#include "ChatDataProvider.h"
+#include "ChatDataWrapper.h"
 #include "NewChatMessageData.h"
 
 #include <QDebug>
@@ -14,6 +14,11 @@ TcpServer::TcpServer(QObject *parent) :
     serverExecutor(new TcpServerExecutor()),
     executorThread(new QThread(this))
 {
+    connect(this, &TcpServer::acceptError, this, [this](auto error){
+        qWarning() << "Accepting new connection error: " << error;
+        qWarning() << "Accepting new connection error description: " << errorString();
+    });
+
     serverExecutor->moveToThread(executorThread);
 
     connect(qApp, &QCoreApplication::aboutToQuit, serverExecutor, &TcpServerExecutor::stop, Qt::QueuedConnection);
