@@ -16,20 +16,19 @@ find_package(Qt${QT_VERSION_MAJOR} COMPONENTS Core LinguistTools Network Sql REQ
 
 
 set(PROJECT_SOURCES
-        AddMessageRequest.h
-        AddMessageRequest.cpp
-        ChatDataRequest.h
-        ChatDataRequest.cpp
-        ChatDataRequestType.h
+        AddMessageTask.h
+        AddMessageTask.cpp
         ChatDataWrapper.h
         ChatDataWrapper.cpp
-        ChatDataWrapperWorker.h
-        ChatDataWrapperWorker.cpp
-        GetHistoryRequest.h
-        GetHistoryRequest.cpp
+        GetHistoryTask.h
+        GetHistoryTask.cpp
         main.cpp
-        TcpServer.cpp
+        SqlConnectionManager.h
+        SqlConnectionManager.cpp
+        SqlTask.h
+        SqlTask.cpp
         TcpServer.h
+        TcpServer.cpp
         TcpServerExecutor.h
         TcpServerExecutor.cpp
         UuidHash.h
