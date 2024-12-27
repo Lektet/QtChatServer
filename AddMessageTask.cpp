@@ -3,6 +3,7 @@
 #include <QSqlQuery>
 
 #include <QDateTime>
+#include <QVariant>
 
 AddChatMessageTask::AddChatMessageTask(int id, const NewChatMessageData& taskMessage) :
     SqlTask(id),
@@ -11,18 +12,16 @@ AddChatMessageTask::AddChatMessageTask(int id, const NewChatMessageData& taskMes
 }
 
 QSqlQuery AddChatMessageTask::prepareQuery(QSqlDatabase db){
+    QSqlQuery newQuery(db);
     auto postTime = QString::number(QDateTime::currentMSecsSinceEpoch());
-    QString queryString("INSERT INTO Messages ("
+    newQuery.prepare("INSERT INTO Messages ("
                         "Text, "
                         "PostTime, "
                         "UserId) "
-                        "VALUES (\"%1\", \"%2\", (SELECT UserId FROM Users WHERE Username = \"%3\"));");
-    queryString = queryString.arg(message.text)
-                      .arg(postTime)
-                      .arg(message.username);
-
-    QSqlQuery newQuery(db);
-    newQuery.prepare(queryString);
+                        "VALUES (:text, :postTime, (SELECT UserId FROM Users WHERE Username = :username));");
+    newQuery.bindValue(":text", QVariant(message.text));
+    newQuery.bindValue(":postTime", postTime);
+    newQuery.bindValue(":username", QVariant(message.username));
     return newQuery;
 }
 

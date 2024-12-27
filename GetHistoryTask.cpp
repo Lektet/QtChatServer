@@ -16,6 +16,7 @@ GetHistoryTask::GetHistoryTask(int id) :
 }
 
 QSqlQuery GetHistoryTask::prepareQuery(QSqlDatabase db){
+    QSqlQuery newQuery(db);
     QString queryString("SELECT %1, %2, %3, %4 "
                         "FROM Messages INNER JOIN Users "
                         "ON Messages.UserId = Users.UserId;");
@@ -23,8 +24,6 @@ QSqlQuery GetHistoryTask::prepareQuery(QSqlDatabase db){
                   arg(MESSAGE_USERNAME_FIELD)
                       .arg(MESSAGE_TEXT_FIELD)
                       .arg(MESSAGE_POST_TIME_FIELD);
-
-    QSqlQuery newQuery(db);
     bool prepareResult = newQuery.prepare(queryString);
     return newQuery;
 }

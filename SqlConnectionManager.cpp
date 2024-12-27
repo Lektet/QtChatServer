@@ -16,17 +16,17 @@ QSqlDatabase SqlConnectionManager::getDb()
     }
 
     auto connectionName = QString::number((long long)QThread::currentThreadId(), 16);
-    QSqlDatabase dbConnection = QSqlDatabase::addDatabase("QSQLITE", connectionName);
-    dbConnection.setDatabaseName(DATABASE_FILE_NAME);
+    QSqlDatabase database = QSqlDatabase::addDatabase("QSQLITE", connectionName);
+    database.setDatabaseName(DATABASE_FILE_NAME);
 
-    if(!dbConnection.open()){
-        qCritical() << "DB connection open error: " << dbConnection.lastError();
-        return dbConnection;
+    if(!database.open()){
+        qCritical() << "DB connection open error: " << database.lastError();
+        return database;
     }
     else{
         qInfo() << "DB connection open success";
     }
 
-    dbs[currentThread] = dbConnection;
-    return dbConnection;
+    dbs[currentThread] = database;
+    return database;
 }

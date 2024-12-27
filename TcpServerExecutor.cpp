@@ -11,8 +11,8 @@
 #include "MessageUtils.h"
 #include "GetHistoryMessage.h"
 #include "GetHistoryResponseMessage.h"
-#include "SendMessageMessage.h"
-#include "SendMessageResponseMessage.h"
+#include "AddMessageMessage.h"
+#include "AddMessageResponseMessage.h"
 #include "NotificationMessage.h"
 #include "NotificationType.h"
 #include "ChatMessageData.h"
@@ -153,15 +153,15 @@ void TcpServerExecutor::onReadyReadMapped(const QUuid &id)
             socketCurrentAction[id] = ChatDataAction::GetHistoryRequest;
             break;
         }
-        case MessageType::SendMessage:{
-            auto sendMessage = std::static_pointer_cast<SendMessageMessage>(message);
+        case MessageType::AddMessage:{
+            auto sendMessage = std::static_pointer_cast<AddMessageMessage>(message);
             auto requestId = chatDataWrapper->requestAddChatMessage(sendMessage->getChatMessageData());
             socketWaitingForResultIds[requestId] = id;
             socketCurrentAction[id] = ChatDataAction::AddMessageRequest;
             break;
         }
         default:
-            qDebug() << "Received message has invalid type: " << messageTypeToString(messageType);
+            qWarning() << "Received message has invalid type: " << messageTypeToString(messageType);
             break;
     }
 }
@@ -215,7 +215,7 @@ void TcpServerExecutor::onAddChatMessageRequestCompleted(int requestId, bool res
     }
 
     auto socket = clientSockets.at(socketId);
-    SendMessageResponseMessage responseMessage(resultFromBool(result));
+    AddMessageResponseMessage responseMessage(resultFromBool(result));
     TcpDataTransmitter::sendData(responseMessage.toJson().toJson(), *socket);
     socketCurrentAction[socketId] = ChatDataAction::NoAction;
 
