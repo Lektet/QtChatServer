@@ -53,9 +53,9 @@ private:
     using NotificationList = std::list<std::shared_ptr<SimpleMessage>>;
     std::map<QUuid, NotificationList> clientNotificationLists;
 
-    std::map<int, QUuid> socketWaitingForResultIds;
+    std::map<int, QUuid> socketIdWaitingForRequestCompleted;
     std::map<QUuid, ChatDataAction> socketCurrentAction;
-    std::unordered_set<QUuid> socketNeedingNotificationIds;
+    std::unordered_set<QUuid> socketIdToNotificate;
 
     bool stopping;
 

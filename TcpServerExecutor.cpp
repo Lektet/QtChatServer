@@ -84,7 +84,7 @@ void TcpServerExecutor::notifyAboutMessagesUpdate()
             qDebug() << "Messages updated notification sent";
             break;
         case ChatDataAction::GetHistoryRequest:
-            socketNeedingNotificationIds.emplace(clientId);
+            socketIdToNotificate.emplace(clientId);
             break;
         default:
             break;
@@ -103,10 +103,8 @@ void TcpServerExecutor::addClient(int socketDescriptor)
 
     auto id = QUuid::createUuid();
     clientSockets.insert(std::make_pair(id, tcpSocket));
-//    awaitedExternalActions.insert(std::make_pair(id, OtherThreadAction::NoAction));
     socketCurrentAction[id] = ChatDataAction::NoAction;
     clientNotificationLists.insert(std::make_pair(id, NotificationList()));
-//    socketStates.push_back(std::make_pair(id, RequestSequence()));
 
     connect(tcpSocket, &QTcpSocket::readyRead, this, [this, id](){
         onReadyReadMapped(id);
@@ -149,14 +147,14 @@ void TcpServerExecutor::onReadyReadMapped(const QUuid &id)
     switch (messageType) {
         case MessageType::GetHistory:{
             auto requestId = chatDataWrapper->requestChatHistory();
-            socketWaitingForResultIds[requestId] = id;
+            socketIdWaitingForRequestCompleted[requestId] = id;
             socketCurrentAction[id] = ChatDataAction::GetHistoryRequest;
             break;
         }
         case MessageType::AddMessage:{
             auto sendMessage = std::static_pointer_cast<AddMessageMessage>(message);
             auto requestId = chatDataWrapper->requestAddChatMessage(sendMessage->getChatMessageData());
-            socketWaitingForResultIds[requestId] = id;
+            socketIdWaitingForRequestCompleted[requestId] = id;
             socketCurrentAction[id] = ChatDataAction::AddMessageRequest;
             break;
         }
@@ -182,12 +180,12 @@ void TcpServerExecutor::onDisconnectedMapped(const QUuid &id)
 
 void TcpServerExecutor::onChatHistoryRequestCompleted(int requestId, const std::vector<ChatMessageData> &history)
 {
-    if(!socketWaitingForResultIds.contains(requestId)){
+    if(!socketIdWaitingForRequestCompleted.contains(requestId)){
         qCritical() << "Invalid completed request id!";
         return;
     }
 
-    auto socketId = socketWaitingForResultIds.at(requestId);
+    auto socketId = socketIdWaitingForRequestCompleted.at(requestId);
     if(!clientSockets.contains(socketId)){
         qCritical() << "Invalid socket id!";
         return;
@@ -203,12 +201,12 @@ void TcpServerExecutor::onChatHistoryRequestCompleted(int requestId, const std::
 
 void TcpServerExecutor::onAddChatMessageRequestCompleted(int requestId, bool result)
 {
-    if(!socketWaitingForResultIds.contains(requestId)){
+    if(!socketIdWaitingForRequestCompleted.contains(requestId)){
         qCritical() << "Invalid completed request id!";
         return;
     }
 
-    auto socketId = socketWaitingForResultIds.at(requestId);
+    auto socketId = socketIdWaitingForRequestCompleted.at(requestId);
     if(!clientSockets.contains(socketId)){
         qCritical() << "Invalid socket id!";
         return;
@@ -226,9 +224,9 @@ void TcpServerExecutor::sendPendingNotification(const QUuid socketId, QTcpSocket
 {
     assert(socket != nullptr);
 
-    if(socketNeedingNotificationIds.contains(socketId)){
+    if(socketIdToNotificate.contains(socketId)){
         auto message = std::make_shared<NotificationMessage>(NotificationType::MessagesUpdated);
         TcpDataTransmitter::sendData(message->toJson().toJson(), *socket);
-        socketNeedingNotificationIds.erase(socketId);
+        socketIdToNotificate.erase(socketId);
     }
 }
