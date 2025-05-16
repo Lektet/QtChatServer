@@ -19,6 +19,8 @@ set(PROJECT_SOURCES
         AddMessageTask.h
         AddMessageTask.cpp
         ChatDataWrapper.h
+        CheckUsernameTask.h
+        CheckUsernameTask.cpp
         ChatDataWrapper.cpp
         GetHistoryTask.h
         GetHistoryTask.cpp

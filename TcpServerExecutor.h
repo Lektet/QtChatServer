@@ -6,11 +6,14 @@
 #include <QTcpSocket>
 #include <QThread>
 #include <QUuid>
+#include <QTimer>
 
 #include <memory>
 #include <map>
 #include <list>
 #include <unordered_set>
+#include <any>
+#include <queue>
 
 #include "UuidHash.h"
 
@@ -40,11 +43,26 @@ signals:
 
     void finished();
 
-private:    
-    enum class ChatDataAction{
-        NoAction,
+private:
+    enum class SessionState{
+        Disconnected,
+        Established,
+        EstablishingCheckingUsername,
+        EstablishingWaitingUserConfirm,
         GetHistoryRequest,
         AddMessageRequest
+    };
+
+    struct SessionInfo{
+        SessionInfo(const QUuid& uuid = QUuid(),
+                    SessionState sessionState = SessionState::Disconnected):
+            socketId(uuid),
+            state(sessionState)
+        {
+        }
+
+        QUuid socketId;
+        SessionState state;
     };
 
     ChatDataWrapper* chatDataWrapper;
@@ -53,9 +71,13 @@ private:
     using NotificationList = std::list<std::shared_ptr<SimpleMessage>>;
     std::map<QUuid, NotificationList> clientNotificationLists;
 
-    std::map<int, QUuid> socketIdWaitingForRequestCompleted;
-    std::map<QUuid, ChatDataAction> socketCurrentAction;
-    std::unordered_set<QUuid> socketIdToNotificate;
+    std::map<QUuid, QUuid> userIdForSessionId;
+    // std::map<QUuid, QTimer*> sessionConfirmTimers;
+    using UserSessionMap = std::map<int, QUuid>;
+    UserSessionMap sessionForRequestInProcess;
+    std::unordered_set<QUuid> sessionsToNotificate;
+
+    std::map<QUuid, SessionInfo> userSessionsInfo;
 
     bool stopping;
 
@@ -66,8 +88,15 @@ private:
 
     void onChatHistoryRequestCompleted(int requestId, const std::vector<ChatMessageData>& history);
     void onAddChatMessageRequestCompleted(int requestId, bool result);
+    void onCheckUsernameCompleted(int requestId, bool isValid);
 
-    void sendPendingNotification(const QUuid socketId, QTcpSocket* const socket);
+    void sendPendingNotification(const QUuid& sessionId);
+
+    QUuid createNewSession(const QUuid &socketId);
+    void removeSession(const QUuid& sessionId);
+
+    QTcpSocket* getSessionSocket(const QUuid& sessionId);
+    bool isSessionEstablished(const QUuid& sessionId);
 };
 
 #endif // TCPSERVEREXECUTOR_H

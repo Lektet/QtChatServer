@@ -14,11 +14,16 @@
 #include "AddMessageMessage.h"
 #include "AddMessageResponseMessage.h"
 #include "NotificationMessage.h"
+#include "NewSessionRequestMessage.h"
+#include "NewSessionResponseMessage.h"
+#include "NewSessionConfirmMessage.h"
 #include "NotificationType.h"
 #include "ChatMessageData.h"
 #include "utils.h"
 
 #include "ChatDataWrapper.h"
+
+const int SESSION_CONFIRM_TIMEOUT = 5000;
 
 Result resultFromBool(bool result)
 {
@@ -39,6 +44,8 @@ TcpServerExecutor::TcpServerExecutor()
             this, &TcpServerExecutor::onChatHistoryRequestCompleted);
     connect(chatDataWrapper, &ChatDataWrapper::addChatMessageRequestCompleted,
             this, &TcpServerExecutor::onAddChatMessageRequestCompleted);
+    connect(chatDataWrapper, &ChatDataWrapper::checkUsernameRequestCompleted,
+            this, &TcpServerExecutor::onCheckUsernameCompleted);
 }
 
 TcpServerExecutor::~TcpServerExecutor()
@@ -72,19 +79,26 @@ void TcpServerExecutor::stop()
 void TcpServerExecutor::notifyAboutMessagesUpdate()
 {
     qDebug() << "TcpServerExecutor::notifyAboutMessagesUpdate()";
-    auto message = std::make_shared<NotificationMessage>(NotificationType::MessagesUpdated);
-    for(auto& item : clientSockets){
-        auto clientId = item.first;
-        auto socket = item.second;
+    for(auto& item : userSessionsInfo){
+        auto sessionId = item.first;
+        auto socketId = item.second.socketId;
 
-        auto currentAction = socketCurrentAction.at(clientId);
-        switch (currentAction) {
-        case ChatDataAction::NoAction:
+        if(!clientSockets.contains(socketId)){
+            qCritical() << "No socket for this socket id: " << socketId;
+            continue;
+        }
+        auto socket = clientSockets.at(socketId);
+
+        auto sessionState = item.second.state;
+        switch (sessionState) {
+        case SessionState::Established:{
+            auto message = std::make_shared<NotificationMessage>(sessionId, NotificationType::MessagesUpdated);
             TcpDataTransmitter::sendData(message->toJson().toJson(), *socket);
             qDebug() << "Messages updated notification sent";
             break;
-        case ChatDataAction::GetHistoryRequest:
-            socketIdToNotificate.emplace(clientId);
+        }
+        case SessionState::GetHistoryRequest:
+            sessionsToNotificate.emplace(sessionId);
             break;
         default:
             break;
@@ -103,8 +117,6 @@ void TcpServerExecutor::addClient(int socketDescriptor)
 
     auto id = QUuid::createUuid();
     clientSockets.insert(std::make_pair(id, tcpSocket));
-    socketCurrentAction[id] = ChatDataAction::NoAction;
-    clientNotificationLists.insert(std::make_pair(id, NotificationList()));
 
     connect(tcpSocket, &QTcpSocket::readyRead, this, [this, id](){
         onReadyReadMapped(id);
@@ -131,6 +143,7 @@ void TcpServerExecutor::onReadyReadMapped(const QUuid &id)
 
     if(data.size() > 1){
         qWarning() << "More than one data array received";
+        qWarning() << "Received data: " << data;
         //TDOD: Send error message to client
         return;
     }
@@ -145,17 +158,80 @@ void TcpServerExecutor::onReadyReadMapped(const QUuid &id)
     auto message = MessageUtils::createMessageFromJson(requestDoc);
     auto messageType = message->getMessageType();
     switch (messageType) {
+        case MessageType::NewSessionRequest:{
+            auto sessionRequestMessage = std::dynamic_pointer_cast<NewSessionRequestMessage>(message);
+            auto userId = sessionRequestMessage->getUserId();
+
+            auto sessionId = createNewSession(id);
+            userIdForSessionId[sessionId] = userId;
+            auto requestId = chatDataWrapper->requestCheckUsername(sessionRequestMessage->getUsername());
+            sessionForRequestInProcess[requestId] = sessionId;
+
+            userSessionsInfo.at(sessionId).state = SessionState::EstablishingCheckingUsername;
+            break;
+        }
+        case MessageType::NewSessionConfirm:{
+            auto sessionRequestMessage = std::dynamic_pointer_cast<NewSessionConfirmMessage>(message);
+            auto userId = sessionRequestMessage->getUserId();
+            auto confirmSessionId = sessionRequestMessage->getSessionId();
+
+            if(!userSessionsInfo.contains(confirmSessionId)){
+                qWarning() << "No session with id: " << confirmSessionId;
+                return;
+            }
+            if(userSessionsInfo[confirmSessionId].state != SessionState::EstablishingWaitingUserConfirm){
+                qWarning() << "Session is not establishing!";
+                return;
+            }
+
+            if(!userIdForSessionId.contains(confirmSessionId)){
+                qWarning() << "No user id for session id: " << confirmSessionId;
+                return;
+            }
+            if(userIdForSessionId.at(confirmSessionId) != userId){
+                qInfo() << "Invalid session id user id pair!";
+                userIdForSessionId.erase(confirmSessionId);
+                return;
+            }
+
+            userSessionsInfo[confirmSessionId].state = SessionState::Established;
+            userIdForSessionId.erase(confirmSessionId);
+            break;
+        }
         case MessageType::GetHistory:{
+            auto requestMessage = std::dynamic_pointer_cast<GetHistoryMessage>(message);
+            auto sessionId = requestMessage->getSessionId();
+            if(!userSessionsInfo.contains(sessionId)){
+                qWarning() << "No session with id: " << sessionId;
+                return;
+            }
+
+            if(!isSessionEstablished(sessionId)){
+                qWarning() << "Session is not ready for new user request!";
+                return;
+            }
+
             auto requestId = chatDataWrapper->requestChatHistory();
-            socketIdWaitingForRequestCompleted[requestId] = id;
-            socketCurrentAction[id] = ChatDataAction::GetHistoryRequest;
+            sessionForRequestInProcess[requestId] = sessionId;
+            userSessionsInfo[sessionId].state = SessionState::GetHistoryRequest;
             break;
         }
         case MessageType::AddMessage:{
-            auto sendMessage = std::static_pointer_cast<AddMessageMessage>(message);
+            auto sendMessage = std::dynamic_pointer_cast<AddMessageMessage>(message);
+            auto sessionId = sendMessage->getSessionId();
+            if(!userSessionsInfo.contains(sessionId)){
+                qWarning() << "No session with id: " << sessionId;
+                return;
+            }
+
+            if(!isSessionEstablished(sessionId)){
+                qWarning() << "Session is not ready for new user request!";
+                return;
+            }
+
             auto requestId = chatDataWrapper->requestAddChatMessage(sendMessage->getChatMessageData());
-            socketIdWaitingForRequestCompleted[requestId] = id;
-            socketCurrentAction[id] = ChatDataAction::AddMessageRequest;
+            sessionForRequestInProcess[requestId] = sessionId;
+            userSessionsInfo[sessionId].state = SessionState::AddMessageRequest;
             break;
         }
         default:
@@ -166,12 +242,18 @@ void TcpServerExecutor::onReadyReadMapped(const QUuid &id)
 
 void TcpServerExecutor::onDisconnectedMapped(const QUuid &id)
 {
-    qDebug() << "TcpServerExecutor::onDisconnectedMapped()";
-
-    clientSockets[id]->deleteLater();
     clientSockets.erase(id);
-    socketCurrentAction.erase(id);
     clientNotificationLists.erase(id);
+
+    for(auto it = userSessionsInfo.begin(); it != userSessionsInfo.end();){
+        if(it->second.socketId == id){
+            userIdForSessionId.erase(it->first);
+            it = userSessionsInfo.erase(it);
+        }
+        else{
+            ++it;
+        }
+    }
 
     if(stopping && clientSockets.empty()){
         emit finished();
@@ -180,53 +262,162 @@ void TcpServerExecutor::onDisconnectedMapped(const QUuid &id)
 
 void TcpServerExecutor::onChatHistoryRequestCompleted(int requestId, const std::vector<ChatMessageData> &history)
 {
-    if(!socketIdWaitingForRequestCompleted.contains(requestId)){
-        qCritical() << "Invalid completed request id!";
+    if(!sessionForRequestInProcess.contains(requestId)){
+        qCritical() << "No request in process with this id: " << requestId;
         return;
     }
 
-    auto socketId = socketIdWaitingForRequestCompleted.at(requestId);
-    if(!clientSockets.contains(socketId)){
-        qCritical() << "Invalid socket id!";
+    auto sessionId = sessionForRequestInProcess.at(requestId);
+    sessionForRequestInProcess.erase(requestId);
+    if(!userSessionsInfo.contains(sessionId)){
+        qDebug() << "No user session info for this session id: " << sessionId;
         return;
     }
+
+    auto socketId = userSessionsInfo.at(sessionId).socketId;    
+    assert(clientSockets.contains(socketId));
 
     auto socket = clientSockets.at(socketId);
-    GetHistoryResponseMessage responseMessage(history);
+    GetHistoryResponseMessage responseMessage(sessionId, history);
     TcpDataTransmitter::sendData(responseMessage.toJson().toJson(), *socket);
-    socketCurrentAction[socketId] = ChatDataAction::NoAction;
+    userSessionsInfo[sessionId].state = SessionState::Established;
 
-    sendPendingNotification(socketId, socket);
+    sendPendingNotification(sessionId);
 }
 
 void TcpServerExecutor::onAddChatMessageRequestCompleted(int requestId, bool result)
 {
-    if(!socketIdWaitingForRequestCompleted.contains(requestId)){
+    if(!sessionForRequestInProcess.contains(requestId)){
         qCritical() << "Invalid completed request id!";
         return;
     }
 
-    auto socketId = socketIdWaitingForRequestCompleted.at(requestId);
-    if(!clientSockets.contains(socketId)){
-        qCritical() << "Invalid socket id!";
+    auto sessionId = sessionForRequestInProcess.at(requestId);
+    sessionForRequestInProcess.erase(requestId);
+    if(!userSessionsInfo.contains(sessionId)){
+        qDebug() << "No user session info for this session id: " << sessionId;
         return;
     }
 
+    auto socketId = userSessionsInfo[sessionId].socketId;    
+    assert(clientSockets.contains(socketId));
+
     auto socket = clientSockets.at(socketId);
-    AddMessageResponseMessage responseMessage(resultFromBool(result));
+    AddMessageResponseMessage responseMessage(sessionId, resultFromBool(result));
     TcpDataTransmitter::sendData(responseMessage.toJson().toJson(), *socket);
-    socketCurrentAction[socketId] = ChatDataAction::NoAction;
+    userSessionsInfo[sessionId].state = SessionState::Established;
 
     notifyAboutMessagesUpdate();
 }
 
-void TcpServerExecutor::sendPendingNotification(const QUuid socketId, QTcpSocket * const socket)
+void TcpServerExecutor::onCheckUsernameCompleted(int requestId, bool isValid)
 {
-    assert(socket != nullptr);
-
-    if(socketIdToNotificate.contains(socketId)){
-        auto message = std::make_shared<NotificationMessage>(NotificationType::MessagesUpdated);
-        TcpDataTransmitter::sendData(message->toJson().toJson(), *socket);
-        socketIdToNotificate.erase(socketId);
+    if(!sessionForRequestInProcess.contains(requestId)){
+        //May be valid way becouse user can try to reconnect
+        qInfo() << "Request id is not valid";
+        return;
     }
+
+    auto sessionId = sessionForRequestInProcess.at(requestId);
+    sessionForRequestInProcess.erase(requestId);
+    if(!userSessionsInfo.contains(sessionId)){
+        qDebug() << "No user session info for this session id: " << sessionId;
+        return;
+    }
+
+    if(userSessionsInfo.at(sessionId).state != SessionState::EstablishingCheckingUsername){
+        qCritical() << "Wrong session sate";
+        return;
+    }
+
+    auto socketId = userSessionsInfo.at(sessionId).socketId;
+    assert(clientSockets.contains(socketId));
+
+    auto socket = clientSockets.at(socketId);
+    QUuid returnedSessionId;
+    if(isValid){
+        returnedSessionId = sessionId;
+    }
+    else{
+        removeSession(sessionId);
+    }
+
+    if(!userIdForSessionId.contains(sessionId)){
+        qCritical() << "No user id for session id: " << sessionId;
+        return;
+    }
+
+    userSessionsInfo[sessionId].state = SessionState::EstablishingWaitingUserConfirm;
+
+    NewSessionResponseMessage responseMessage(isValid,
+                                              userIdForSessionId.at(sessionId),
+                                              returnedSessionId);
+    TcpDataTransmitter::sendData(responseMessage.toJson().toJson(), *socket);
+}
+
+void TcpServerExecutor::sendPendingNotification(const QUuid &sessionId)
+{
+    if(sessionsToNotificate.contains(sessionId)){
+        if(!userSessionsInfo.contains(sessionId)){
+            qCritical() << "No session info for this session id: " << sessionId;
+        }
+        auto sessionSocketId = userSessionsInfo.at(sessionId).socketId;
+
+        if(!clientSockets.contains(sessionSocketId)){
+            qCritical() << "No socket for this socket id: " << sessionSocketId;
+        }
+        auto socket = clientSockets.at(sessionSocketId);
+
+        auto message = std::make_shared<NotificationMessage>(sessionId, NotificationType::MessagesUpdated);
+        TcpDataTransmitter::sendData(message->toJson().toJson(), *socket);
+        sessionsToNotificate.erase(sessionId);
+    }
+}
+
+QUuid TcpServerExecutor::createNewSession(const QUuid &socketId)
+{
+    auto sessionId = QUuid::createUuid();
+    userSessionsInfo[sessionId] = SessionInfo(socketId);
+    return sessionId;
+}
+
+void TcpServerExecutor::removeSession(const QUuid &sessionId)
+{
+    if(!userSessionsInfo.contains(sessionId)){
+        qWarning() << "No session with this id: " << sessionId;
+    }
+
+    userSessionsInfo.erase(sessionId);
+}
+
+QTcpSocket *TcpServerExecutor::getSessionSocket(const QUuid &sessionId)
+{
+    if(!userSessionsInfo.contains(sessionId)){
+        qWarning() << "No user session info for this session id: " << sessionId;
+        return nullptr;
+    }
+
+    auto socketId = userSessionsInfo[sessionId].socketId;
+    if(!clientSockets.contains(socketId)){
+        qWarning() << "No socket for this user socket id: " << socketId;
+        return nullptr;
+    }
+
+    return clientSockets.at(socketId);
+}
+
+bool TcpServerExecutor::isSessionEstablished(const QUuid &sessionId)
+{
+    if(!userSessionsInfo.contains(sessionId)){
+        qWarning() << "No user session info for this session id: " << sessionId;
+        return false;
+    }
+
+    if(userSessionsInfo[sessionId].state != SessionState::Established){
+        qWarning() << "Previous request is not finished!";
+        //TODO: Process error
+        return false;
+    }
+
+    return true;
 }

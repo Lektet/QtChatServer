@@ -4,6 +4,7 @@
 
 #include "ChatDataWrapperWorker.h"
 
+#include "CheckUsernameTask.h"
 #include "GetHistoryTask.h"
 #include "AddMessageTask.h"
 
@@ -28,6 +29,16 @@ int ChatDataWrapper::requestAddChatMessage(const NewChatMessageData &message)
     auto task = new AddChatMessageTask(++lastId, message);
     connect(task, &AddChatMessageTask::taskCompleted,
             this, &ChatDataWrapper::addChatMessageRequestCompleted,
+            Qt::QueuedConnection);
+    QThreadPool::globalInstance()->start(task);
+    return lastId;
+}
+
+int ChatDataWrapper::requestCheckUsername(const QString &username)
+{
+    auto task = new CheckUsernameTask(++lastId, username);
+    connect(task, &CheckUsernameTask::taskCompleted,
+            this, &ChatDataWrapper::checkUsernameRequestCompleted,
             Qt::QueuedConnection);
     QThreadPool::globalInstance()->start(task);
     return lastId;

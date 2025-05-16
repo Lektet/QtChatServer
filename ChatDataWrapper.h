@@ -19,10 +19,12 @@ public:
 
     int requestChatHistory();
     int requestAddChatMessage(const NewChatMessageData& message);
+    int requestCheckUsername(const QString& username);
 
 signals:
     void chatHistoryRequestCompleted(int id, const std::vector<ChatMessageData> history);
     void addChatMessageRequestCompleted(int id, bool result);
+    void checkUsernameRequestCompleted(int id, bool isValid);
 
 private:
     int lastId;
