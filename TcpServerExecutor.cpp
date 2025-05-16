@@ -167,7 +167,7 @@ void TcpServerExecutor::onReadyReadMapped(const QUuid &id)
             auto requestId = chatDataWrapper->requestCheckUsername(sessionRequestMessage->getUsername());
             sessionForRequestInProcess[requestId] = sessionId;
 
-            userSessionsInfo.at(sessionId).state = SessionState::EstablishingCheckingUsername;
+            userSessionsInfo[sessionId].state = SessionState::EstablishingCheckingUsername;
             break;
         }
         case MessageType::NewSessionConfirm:{
@@ -188,14 +188,14 @@ void TcpServerExecutor::onReadyReadMapped(const QUuid &id)
                 qWarning() << "No user id for session id: " << confirmSessionId;
                 return;
             }
-            if(userIdForSessionId.at(confirmSessionId) != userId){
+            auto initialUserId = userIdForSessionId[confirmSessionId];
+            userIdForSessionId.erase(confirmSessionId);
+            if(initialUserId != userId){
                 qInfo() << "Invalid session id user id pair!";
-                userIdForSessionId.erase(confirmSessionId);
                 return;
             }
 
             userSessionsInfo[confirmSessionId].state = SessionState::Established;
-            userIdForSessionId.erase(confirmSessionId);
             break;
         }
         case MessageType::GetHistory:{
@@ -262,22 +262,19 @@ void TcpServerExecutor::onDisconnectedMapped(const QUuid &id)
 
 void TcpServerExecutor::onChatHistoryRequestCompleted(int requestId, const std::vector<ChatMessageData> &history)
 {
-    if(!sessionForRequestInProcess.contains(requestId)){
-        qCritical() << "No request in process with this id: " << requestId;
-        return;
-    }
+    assert(sessionForRequestInProcess.contains(requestId));
 
-    auto sessionId = sessionForRequestInProcess.at(requestId);
+    auto sessionId = sessionForRequestInProcess[requestId];
     sessionForRequestInProcess.erase(requestId);
     if(!userSessionsInfo.contains(sessionId)){
         qDebug() << "No user session info for this session id: " << sessionId;
         return;
     }
 
-    auto socketId = userSessionsInfo.at(sessionId).socketId;    
+    auto socketId = userSessionsInfo[sessionId].socketId;
     assert(clientSockets.contains(socketId));
 
-    auto socket = clientSockets.at(socketId);
+    auto socket = clientSockets[socketId];
     GetHistoryResponseMessage responseMessage(sessionId, history);
     TcpDataTransmitter::sendData(responseMessage.toJson().toJson(), *socket);
     userSessionsInfo[sessionId].state = SessionState::Established;
@@ -287,12 +284,9 @@ void TcpServerExecutor::onChatHistoryRequestCompleted(int requestId, const std::
 
 void TcpServerExecutor::onAddChatMessageRequestCompleted(int requestId, bool result)
 {
-    if(!sessionForRequestInProcess.contains(requestId)){
-        qCritical() << "Invalid completed request id!";
-        return;
-    }
+    assert(sessionForRequestInProcess.contains(requestId));
 
-    auto sessionId = sessionForRequestInProcess.at(requestId);
+    auto sessionId = sessionForRequestInProcess[requestId];
     sessionForRequestInProcess.erase(requestId);
     if(!userSessionsInfo.contains(sessionId)){
         qDebug() << "No user session info for this session id: " << sessionId;
@@ -302,7 +296,7 @@ void TcpServerExecutor::onAddChatMessageRequestCompleted(int requestId, bool res
     auto socketId = userSessionsInfo[sessionId].socketId;    
     assert(clientSockets.contains(socketId));
 
-    auto socket = clientSockets.at(socketId);
+    auto socket = clientSockets[socketId];
     AddMessageResponseMessage responseMessage(sessionId, resultFromBool(result));
     TcpDataTransmitter::sendData(responseMessage.toJson().toJson(), *socket);
     userSessionsInfo[sessionId].state = SessionState::Established;
@@ -318,22 +312,22 @@ void TcpServerExecutor::onCheckUsernameCompleted(int requestId, bool isValid)
         return;
     }
 
-    auto sessionId = sessionForRequestInProcess.at(requestId);
+    auto sessionId = sessionForRequestInProcess[requestId];
     sessionForRequestInProcess.erase(requestId);
     if(!userSessionsInfo.contains(sessionId)){
         qDebug() << "No user session info for this session id: " << sessionId;
         return;
     }
 
-    if(userSessionsInfo.at(sessionId).state != SessionState::EstablishingCheckingUsername){
+    if(userSessionsInfo[sessionId].state != SessionState::EstablishingCheckingUsername){
         qCritical() << "Wrong session sate";
         return;
     }
 
-    auto socketId = userSessionsInfo.at(sessionId).socketId;
+    auto socketId = userSessionsInfo[sessionId].socketId;
     assert(clientSockets.contains(socketId));
 
-    auto socket = clientSockets.at(socketId);
+    auto socket = clientSockets[socketId];
     QUuid returnedSessionId;
     if(isValid){
         returnedSessionId = sessionId;
@@ -350,7 +344,7 @@ void TcpServerExecutor::onCheckUsernameCompleted(int requestId, bool isValid)
     userSessionsInfo[sessionId].state = SessionState::EstablishingWaitingUserConfirm;
 
     NewSessionResponseMessage responseMessage(isValid,
-                                              userIdForSessionId.at(sessionId),
+                                              userIdForSessionId[sessionId],
                                               returnedSessionId);
     TcpDataTransmitter::sendData(responseMessage.toJson().toJson(), *socket);
 }
@@ -361,12 +355,12 @@ void TcpServerExecutor::sendPendingNotification(const QUuid &sessionId)
         if(!userSessionsInfo.contains(sessionId)){
             qCritical() << "No session info for this session id: " << sessionId;
         }
-        auto sessionSocketId = userSessionsInfo.at(sessionId).socketId;
+        auto sessionSocketId = userSessionsInfo[sessionId].socketId;
 
         if(!clientSockets.contains(sessionSocketId)){
             qCritical() << "No socket for this socket id: " << sessionSocketId;
         }
-        auto socket = clientSockets.at(sessionSocketId);
+        auto socket = clientSockets[sessionSocketId];
 
         auto message = std::make_shared<NotificationMessage>(sessionId, NotificationType::MessagesUpdated);
         TcpDataTransmitter::sendData(message->toJson().toJson(), *socket);
